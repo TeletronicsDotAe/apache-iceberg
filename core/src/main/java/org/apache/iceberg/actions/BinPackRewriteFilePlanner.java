@@ -172,7 +172,11 @@ public class BinPackRewriteFilePlanner
     return Iterables.filter(
         tasks,
         task ->
-            outsideDesiredFileSizeRange(task) || tooManyDeletes(task) || tooHighDeleteRatio(task));
+            includeFilesFilter()
+                ? includedFile(task)
+                : outsideDesiredFileSizeRange(task)
+                    || tooManyDeletes(task)
+                    || tooHighDeleteRatio(task));
   }
 
   @Override
