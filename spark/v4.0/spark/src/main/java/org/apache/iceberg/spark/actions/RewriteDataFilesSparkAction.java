@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
@@ -81,6 +82,9 @@ public class RewriteDataFilesSparkAction
           REWRITE_JOB_ORDER,
           OUTPUT_SPEC_ID,
           REMOVE_DANGLING_DELETES,
+          INCLUDE_FILES,
+          INCLUDE_FILES_PATTERN,
+          ADDITIONAL_JOB_DESC,
           BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE);
 
   private static final RewriteDataFilesSparkAction.Result EMPTY_RESULT =
@@ -210,6 +214,12 @@ public class RewriteDataFilesSparkAction
       FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan,
       RewriteFileGroup fileGroup) {
     String desc = jobDesc(fileGroup, plan);
+
+    final String additionalDesc =
+        PropertyUtil.propertyAsString(options(), ADDITIONAL_JOB_DESC, null);
+
+    desc = desc + Optional.ofNullable(additionalDesc).map(d -> " - " + d).orElse("");
+
     Set<DataFile> addedFiles =
         withJobGroupInfo(
             newJobGroupInfo("REWRITE-DATA-FILES", desc), () -> runner.rewrite(fileGroup));
