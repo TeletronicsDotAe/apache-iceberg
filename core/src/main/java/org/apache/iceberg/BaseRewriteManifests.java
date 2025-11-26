@@ -67,6 +67,7 @@ public class BaseRewriteManifests extends SnapshotProducer<RewriteManifests>
   private Predicate<ManifestFile> predicate;
 
   private final SnapshotSummary.Builder summaryBuilder = SnapshotSummary.builder();
+  private boolean skipValidation;
 
   BaseRewriteManifests(String tableName, TableOperations ops) {
     super(ops);
@@ -130,6 +131,12 @@ public class BaseRewriteManifests extends SnapshotProducer<RewriteManifests>
   }
 
   @Override
+  public RewriteManifests withoutValidation() {
+    this.skipValidation = true;
+    return this;
+  }
+
+  @Override
   public RewriteManifests addManifest(ManifestFile manifest) {
     Preconditions.checkArgument(!manifest.hasAddedFiles(), "Cannot add manifest with added files");
     Preconditions.checkArgument(
@@ -179,7 +186,9 @@ public class BaseRewriteManifests extends SnapshotProducer<RewriteManifests>
       keepActiveManifests(currentManifests);
     }
 
-    validateFilesCounts();
+    if (!skipValidation) {
+      validateFilesCounts();
+    }
 
     Iterable<ManifestFile> newManifestsWithMetadata =
         Iterables.transform(
