@@ -54,6 +54,7 @@ public class SnapshotSummary {
   public static final String REMOVED_EQ_DELETES_PROP = "removed-equality-deletes";
   public static final String TOTAL_EQ_DELETES_PROP = "total-equality-deletes";
   public static final String DELETED_DUPLICATE_FILES = "deleted-duplicate-files";
+  public static final String DELETED_DUPLICATE_FILES_RECORD_COUNT = "deleted-duplicate-files-record-count";
   public static final String CHANGED_PARTITION_COUNT_PROP = "changed-partition-count";
   public static final String CHANGED_PARTITION_PREFIX = "partitions.";
   public static final String PARTITION_SUMMARY_PROP = "partition-summaries-included";
@@ -82,6 +83,7 @@ public class SnapshotSummary {
     private final UpdateMetrics metrics = new UpdateMetrics();
     private int maxChangedPartitionsForSummaries = 0;
     private long deletedDuplicateFiles = 0L;
+    private long deletedDuplicateFilesRecordCount = 0L;
     private boolean trustPartitionMetrics = true;
 
     private Builder() {}
@@ -90,6 +92,7 @@ public class SnapshotSummary {
       partitionMetrics.clear();
       metrics.clear();
       this.deletedDuplicateFiles = 0L;
+      this.deletedDuplicateFilesRecordCount = 0L;
       this.trustPartitionMetrics = true;
     }
 
@@ -113,6 +116,10 @@ public class SnapshotSummary {
 
     public void incrementDuplicateDeletes(int increment) {
       this.deletedDuplicateFiles += increment;
+    }
+
+    public void incrementDuplicateDeletesRecordCount(long increment) {
+      this.deletedDuplicateFilesRecordCount += increment;
     }
 
     public void addedFile(PartitionSpec spec, DataFile file) {
@@ -186,6 +193,7 @@ public class SnapshotSummary {
       }
 
       this.deletedDuplicateFiles += builder.deletedDuplicateFiles;
+      this.deletedDuplicateFilesRecordCount += builder.deletedDuplicateFilesRecordCount;
     }
 
     public Map<String, String> build() {
@@ -196,6 +204,7 @@ public class SnapshotSummary {
 
       metrics.addTo(builder);
       setIf(deletedDuplicateFiles > 0, builder, DELETED_DUPLICATE_FILES, deletedDuplicateFiles);
+      setIf(deletedDuplicateFilesRecordCount > 0, builder, DELETED_DUPLICATE_FILES_RECORD_COUNT, deletedDuplicateFilesRecordCount);
       Set<String> changedPartitions = partitionMetrics.keySet();
       setIf(trustPartitionMetrics, builder, CHANGED_PARTITION_COUNT_PROP, changedPartitions.size());
 

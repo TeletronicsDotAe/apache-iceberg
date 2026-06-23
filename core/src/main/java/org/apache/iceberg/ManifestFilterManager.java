@@ -79,6 +79,7 @@ abstract class ManifestFilterManager<F extends ContentFile<F>> {
   private boolean failAnyDelete = false;
   private boolean failMissingDeletePaths = false;
   private int duplicateDeleteCount = 0;
+  private long duplicateDeleteRecordsCount = 0;
   private boolean caseSensitive = true;
   private boolean allDeletesReferenceManifests = true;
   // this is only being used for the DeleteManifestFilterManager to detect orphaned DVs for removed
@@ -261,6 +262,7 @@ abstract class ManifestFilterManager<F extends ContentFile<F>> {
     }
 
     summaryBuilder.incrementDuplicateDeletes(duplicateDeleteCount);
+    summaryBuilder.incrementDuplicateDeletesRecordCount(duplicateDeleteRecordsCount);
 
     return summaryBuilder;
   }
@@ -523,6 +525,7 @@ abstract class ManifestFilterManager<F extends ContentFile<F>> {
                             manifest.path(),
                             file.location());
                         duplicateDeleteCount += 1;
+                        duplicateDeleteRecordsCount += file.recordCount();
                       } else {
                         // only add the file to deletes if it is a new delete
                         // this keeps the snapshot summary accurate for non-duplicate data

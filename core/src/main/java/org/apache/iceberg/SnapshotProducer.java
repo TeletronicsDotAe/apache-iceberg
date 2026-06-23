@@ -303,13 +303,17 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
           PropertyUtil.propertyAsLong(summary, SnapshotSummary.ADDED_RECORDS_PROP, 0L);
       long replacedRecords =
           PropertyUtil.propertyAsLong(summary, SnapshotSummary.DELETED_RECORDS_PROP, 0L);
+      long deletedDuplicateFilesRecordCount =
+          PropertyUtil.propertyAsLong(summary, SnapshotSummary.DELETED_DUPLICATE_FILES_RECORD_COUNT, 0L);
 
       // added may be less than replaced when records are already deleted by delete files
       Preconditions.checkArgument(
-          addedRecords <= replacedRecords,
-          "Invalid REPLACE operation: %s added records > %s replaced records",
+          addedRecords <= (replacedRecords -  deletedDuplicateFilesRecordCount),
+          "Invalid REPLACE operation: %s added records > %s replaced records (%s replaced - %s duplicate files records)",
           addedRecords,
-          replacedRecords);
+          replacedRecords - deletedDuplicateFilesRecordCount,
+          replacedRecords,
+          deletedDuplicateFilesRecordCount);
     }
 
     return new BaseSnapshot(
