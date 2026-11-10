@@ -27,17 +27,22 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import org.apache.iceberg.CatalogProperties;
+import org.apache.iceberg.DataFile;
 import org.apache.iceberg.EnvironmentContext;
+import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.ManifestWriter;
 import org.apache.iceberg.ParameterizedTestExtension;
 import org.apache.iceberg.PartitionStatistics;
 import org.apache.iceberg.PartitionStatsHandler;
 import org.apache.iceberg.SnapshotSummary;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
+import org.apache.iceberg.TableUtil;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Hilbert;
@@ -185,6 +190,56 @@ public class TestRewriteDataFilesProcedure extends ExtensionsTestBase {
             "CALL %s.system.rewrite_data_files(table => '%s', strategy => 'sort', sort_order => 'c1 DESC', options => map('include-files-pattern', '.*'))",
             catalogName, tableIdent);
     assertEquals("Procedure output must match", ImmutableList.of(row(0, 0, 0L, 0, 0)), output);
+  }
+
+  @TestTemplate
+  public void testRewriteDataFilesWithDuplicateManifestEntries() throws IOException {
+    createTable();
+    for (int batch = 0; batch < 3; batch++) {
+      int start = batch * 10;
+      sql(
+          "INSERT INTO %s SELECT id, CAST(id AS STRING), NULL FROM range(%d, %d) AS t(id)",
+          tableName, start, start + 10);
+    }
+
+    // re-add one data file through a manifest that lists it twice
+    Table table = validationCatalog.loadTable(tableIdent);
+    DataFile duplicated = table.currentSnapshot().addedDataFiles(table.io()).iterator().next();
+    table.newDelete().deleteFile(duplicated).commit();
+    ManifestWriter<DataFile> writer =
+        ManifestFiles.write(
+            TableUtil.formatVersion(table),
+            table.spec(),
+            table.io().newOutputFile(table.location() + "/metadata/" + UUID.randomUUID() + ".avro"),
+            null);
+    try (ManifestWriter<DataFile> closeable = writer) {
+      closeable.add(duplicated);
+      closeable.add(duplicated);
+    }
+    table.newFastAppend().appendManifest(writer.toManifestFile()).commit();
+    sql("REFRESH TABLE %s", tableName);
+
+    assertThat(scalarSql("SELECT count(*) FROM %s", tableName))
+        .isEqualTo(30L + duplicated.recordCount());
+    assertThat(scalarSql("SELECT count(DISTINCT c1) FROM %s", tableName)).isEqualTo(30L);
+
+    String includeFiles =
+        sql("SELECT DISTINCT file_path FROM %s.files", tableName).stream()
+            .map(row -> (String) row[0])
+            .collect(Collectors.joining(","));
+    sql(
+        "CALL %s.system.rewrite_data_files(table => '%s', options => map('include-files', '%s', 'min-input-files', '1'))",
+        catalogName, tableIdent, includeFiles);
+    sql("REFRESH TABLE %s", tableName);
+
+    assertThat(scalarSql("SELECT count(*) FROM %s", tableName)).isEqualTo(30L);
+    assertThat(scalarSql("SELECT count(DISTINCT c1) FROM %s", tableName)).isEqualTo(30L);
+    assertThat(
+            scalarSql(
+                "SELECT count(*) FROM %s.files WHERE file_path = '%s'",
+                tableName, duplicated.location()))
+        .isEqualTo(0L);
+    assertThat(snapshotSummary()).containsEntry(SnapshotSummary.DELETED_DUPLICATE_FILES, "1");
   }
 
   @TestTemplate

@@ -42,6 +42,7 @@ import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ContentFileUtil;
 import org.apache.iceberg.util.PropertyUtil;
@@ -318,8 +319,21 @@ public class BinPackRewriteFilePlanner
       Table table, Types.StructType partitionType, Iterable<FileScanTask> tasks) {
     StructLikeMap<List<FileScanTask>> filesByPartition = StructLikeMap.create(partitionType);
     StructLike emptyStruct = GenericRecord.create(partitionType);
+    Set<String> plannedLocations = Sets.newHashSet();
 
     for (FileScanTask task : tasks) {
+      // A data file can be referenced by more than one live manifest entry, e.g. when a manifest
+      // contains duplicate entries for it. Scanning returns one task per entry, so rewriting all
+      // of them would read the file repeatedly and write its rows more than once. Plan each file
+      // once; committing the rewrite deletes the file by location, which removes every entry.
+      if (!plannedLocations.add(task.file().location())) {
+        LOG.warn(
+            "Skipping duplicate manifest entry for data file {} in table {}",
+            task.file().location(),
+            table.name());
+        continue;
+      }
+
       // If a task uses an incompatible partition spec the data inside could contain values
       // which belong to multiple partitions in the current spec. Treating all such files as
       // un-partitioned and grouping them together helps to minimize new files made.

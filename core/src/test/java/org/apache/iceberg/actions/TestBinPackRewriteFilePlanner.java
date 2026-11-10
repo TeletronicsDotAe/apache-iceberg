@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -33,13 +34,19 @@ import java.util.stream.Collectors;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.ManifestFile;
+import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.ManifestWriter;
 import org.apache.iceberg.MockFileScanTask;
+import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.RewriteJobOrder;
 import org.apache.iceberg.StructLike;
+import org.apache.iceberg.TableUtil;
 import org.apache.iceberg.TestBase;
 import org.apache.iceberg.TestTables;
 import org.apache.iceberg.actions.RewriteDataFiles.FileGroupInfo;
 import org.apache.iceberg.expressions.Expressions;
+import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
@@ -707,6 +714,82 @@ class TestBinPackRewriteFilePlanner {
             FILE_1.location()));
 
     assertThat(plannedLocations(planner.plan())).isEmpty();
+  }
+
+  @Test
+  void testDuplicateManifestEntriesArePlannedOnce() throws IOException {
+    appendManifest(FILE_1, FILE_1, FILE_2);
+    assertThat(scanLocations()).hasSize(3);
+
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    planner.init(REWRITE_ALL);
+
+    assertThat(plannedLocations(planner.plan()))
+        .containsExactlyInAnyOrder(FILE_1.location(), FILE_2.location());
+  }
+
+  @Test
+  void testRewriteRemovesDuplicateManifestEntries() throws IOException {
+    appendManifest(FILE_1, FILE_1, FILE_2);
+
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    planner.init(ImmutableMap.of(RewriteDataFiles.INCLUDE_FILES, FILE_1.location()));
+    List<RewriteFileGroup> groups = Lists.newArrayList(planner.plan().groups().iterator());
+    // FILE_1 is planned once, so a single-file group remains and the group filter drops it
+    assertThat(groups).isEmpty();
+
+    planner = new BinPackRewriteFilePlanner(table);
+    planner.init(REWRITE_ALL);
+    groups = Lists.newArrayList(planner.plan().groups().iterator());
+    assertThat(groups).hasSize(1);
+    RewriteFileGroup group = groups.get(0);
+
+    // simulate the rewrite: the output holds exactly the records of the planned input tasks
+    long rewrittenRecords =
+        group.fileScanTasks().stream().mapToLong(task -> task.file().recordCount()).sum();
+    DataFile output =
+        DataFiles.builder(TestBase.SPEC)
+            .withPath("/path/to/data-rewritten.parquet")
+            .withFileSizeInBytes(20)
+            .withPartitionPath("data_bucket=0")
+            .withRecordCount(rewrittenRecords)
+            .build();
+    RewriteFiles rewrite = table.newRewrite();
+    group.rewrittenFiles().forEach(rewrite::deleteFile);
+    rewrite.addFile(output).commit();
+
+    assertThat(table.currentSnapshot().summary())
+        .containsEntry("added-records", "2")
+        .containsEntry("deleted-records", "2")
+        .containsEntry("deleted-duplicate-files", "1");
+    assertThat(scanLocations()).containsExactly(output.location());
+  }
+
+  private void appendManifest(DataFile... files) throws IOException {
+    ManifestWriter<DataFile> writer =
+        ManifestFiles.write(
+            TableUtil.formatVersion(table),
+            table.spec(),
+            table
+                .io()
+                .newOutputFile(new File(tableDir, "dup-" + UUID.randomUUID() + ".avro").getPath()),
+            null);
+    try (ManifestWriter<DataFile> closeable = writer) {
+      for (DataFile file : files) {
+        closeable.add(file);
+      }
+    }
+
+    ManifestFile manifest = writer.toManifestFile();
+    table.newFastAppend().appendManifest(manifest).commit();
+  }
+
+  private List<String> scanLocations() throws IOException {
+    try (CloseableIterable<FileScanTask> tasks = table.newScan().planFiles()) {
+      return Lists.newArrayList(tasks).stream()
+          .map(task -> task.file().location())
+          .collect(Collectors.toList());
+    }
   }
 
   private static List<String> plannedLocations(
