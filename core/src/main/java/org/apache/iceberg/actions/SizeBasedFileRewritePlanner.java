@@ -19,10 +19,13 @@
 package org.apache.iceberg.actions;
 
 import java.math.RoundingMode;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.ContentScanTask;
 import org.apache.iceberg.StructLike;
@@ -127,6 +130,8 @@ public abstract class SizeBasedFileRewritePlanner<
   private long maxGroupSize;
   private long maxGroupCount;
   private int outputSpecId;
+  private Set<String> includeFiles;
+  private Pattern includeFilesPattern;
 
   protected SizeBasedFileRewritePlanner(Table table) {
     this.table = table;
@@ -164,6 +169,8 @@ public abstract class SizeBasedFileRewritePlanner<
     this.maxGroupSize = maxGroupSize(options);
     this.maxGroupCount = maxGroupCount(options);
     this.outputSpecId = outputSpecId(options);
+    this.includeFiles = includeFiles(options);
+    this.includeFilesPattern = includeFilesPattern(options);
 
     if (rewriteAll) {
       LOG.info("Configured to rewrite all provided files in table {}", table.name());
@@ -176,6 +183,29 @@ public abstract class SizeBasedFileRewritePlanner<
 
   protected boolean outsideDesiredFileSizeRange(T task) {
     return task.length() < minFileSize || task.length() > maxFileSize;
+  }
+
+  /**
+   * Whether the task's file is selected by {@link RewriteDataFiles#INCLUDE_FILES} or, if that is
+   * not set, {@link RewriteDataFiles#INCLUDE_FILES_PATTERN}.
+   */
+  protected boolean includedFile(T task) {
+    String location = task.file().location();
+
+    if (!includeFiles.isEmpty()) {
+      return includeFiles.contains(location);
+    }
+
+    if (includeFilesPattern != null) {
+      return includeFilesPattern.matcher(location).matches();
+    }
+
+    return true;
+  }
+
+  /** Whether an explicit file selection replaces the size and delete based selection criteria. */
+  protected boolean includeFilesFilter() {
+    return !includeFiles.isEmpty() || includeFilesPattern != null;
   }
 
   protected Iterable<List<T>> planFileGroups(Iterable<T> tasks) {
@@ -361,6 +391,20 @@ public abstract class SizeBasedFileRewritePlanner<
 
   private boolean rewriteAll(Map<String, String> options) {
     return PropertyUtil.propertyAsBoolean(options, REWRITE_ALL, REWRITE_ALL_DEFAULT);
+  }
+
+  private static Set<String> includeFiles(Map<String, String> options) {
+    String value = PropertyUtil.propertyAsString(options, RewriteDataFiles.INCLUDE_FILES, "");
+    return Arrays.stream(value.split(","))
+        .map(String::trim)
+        .filter(location -> !location.isEmpty())
+        .collect(Collectors.toSet());
+  }
+
+  private static Pattern includeFilesPattern(Map<String, String> options) {
+    String value =
+        PropertyUtil.propertyAsString(options, RewriteDataFiles.INCLUDE_FILES_PATTERN, null);
+    return value != null ? Pattern.compile(value) : null;
   }
 
   protected static class RewriteExecutionContext {

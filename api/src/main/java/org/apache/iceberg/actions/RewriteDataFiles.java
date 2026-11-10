@@ -139,6 +139,23 @@ public interface RewriteDataFiles
   String REWRITE_JOB_ORDER_DEFAULT = RewriteJobOrder.NONE.orderName();
 
   /**
+   * Comma-separated list of data file locations to rewrite. When set, only files whose location
+   * exactly matches one of the entries are selected, and the size and delete based selection
+   * criteria are ignored. Takes precedence over {@link #INCLUDE_FILES_PATTERN}.
+   */
+  String INCLUDE_FILES = "include-files";
+
+  /**
+   * Regular expression matched against the full data file location. When set (and {@link
+   * #INCLUDE_FILES} is not), only matching files are selected, and the size and delete based
+   * selection criteria are ignored.
+   */
+  String INCLUDE_FILES_PATTERN = "include-files-pattern";
+
+  /** Additional text appended to the Spark job description of each rewrite file group. */
+  String ADDITIONAL_JOB_DESC = "job-desc";
+
+  /**
    * The partition specification ID to be used for rewritten files
    *
    * <p>output-spec-id ID is used by the file rewriter during the rewrite operation to identify the

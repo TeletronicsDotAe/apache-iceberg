@@ -95,7 +95,10 @@ public class RewriteDataFilesSparkAction
           OUTPUT_SPEC_ID,
           REMOVE_DANGLING_DELETES,
           CACHE_DELETE_FILES,
-          BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE);
+          BinPackRewriteFilePlanner.MAX_FILES_TO_REWRITE,
+          INCLUDE_FILES,
+          INCLUDE_FILES_PATTERN,
+          ADDITIONAL_JOB_DESC);
 
   private static final ImmutableRewriteDataFiles.Result EMPTY_RESULT =
       ImmutableRewriteDataFiles.Result.builder().rewriteResults(ImmutableList.of()).build();
@@ -240,6 +243,11 @@ public class RewriteDataFilesSparkAction
       FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan,
       RewriteFileGroup fileGroup) {
     String desc = jobDesc(fileGroup, plan);
+    String additionalDesc = PropertyUtil.propertyAsString(options(), ADDITIONAL_JOB_DESC, null);
+    if (additionalDesc != null) {
+      desc = desc + " - " + additionalDesc;
+    }
+
     Set<DataFile> addedFiles =
         withJobGroupInfo(
             newJobGroupInfo("REWRITE-DATA-FILES", desc), () -> runner.rewrite(fileGroup));

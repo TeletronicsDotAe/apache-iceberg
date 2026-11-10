@@ -28,6 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
@@ -615,6 +616,105 @@ class TestBinPackRewriteFilePlanner {
             .map(List::size)
             .reduce(0, Integer::sum);
     assertThat(fileScanTasks).isLessThanOrEqualTo(numFiles).isLessThanOrEqualTo(500);
+  }
+
+  @Test
+  void testIncludeFilesSelectsOnlyListedFiles() {
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    planner.init(
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MIN_INPUT_FILES,
+            "1",
+            RewriteDataFiles.INCLUDE_FILES,
+            String.format(
+                " %s , %s,%s ,,%s",
+                FILE_1.location(), FILE_2.location(), FILE_4.location(), FILE_5.location())));
+
+    assertThat(plannedLocations(planner.plan()))
+        .containsExactlyInAnyOrder(
+            FILE_1.location(), FILE_2.location(), FILE_4.location(), FILE_5.location());
+  }
+
+  @Test
+  void testIncludeFilesPatternSelectsOnlyMatchingFiles() {
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    planner.init(
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MIN_INPUT_FILES,
+            "1",
+            RewriteDataFiles.INCLUDE_FILES_PATTERN,
+            Pattern.quote(FILE_4.location()) + "|" + Pattern.quote(FILE_5.location())));
+
+    assertThat(plannedLocations(planner.plan()))
+        .containsExactlyInAnyOrder(FILE_4.location(), FILE_5.location());
+  }
+
+  @Test
+  void testIncludeFilesTakesPrecedenceOverPattern() {
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    planner.init(
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MIN_INPUT_FILES,
+            "1",
+            RewriteDataFiles.INCLUDE_FILES,
+            FILE_1.location() + "," + FILE_2.location(),
+            RewriteDataFiles.INCLUDE_FILES_PATTERN,
+            ".*"));
+
+    assertThat(plannedLocations(planner.plan()))
+        .containsExactlyInAnyOrder(FILE_1.location(), FILE_2.location());
+  }
+
+  @Test
+  void testIncludeFilesOverridesSizeBasedSelection() {
+    // with these thresholds FILE_1..FILE_5 (10-11 bytes) are inside the desired size range and
+    // only FILE_6 (50 bytes) is selected on size alone
+    addFiles();
+    Map<String, String> sizeOptions =
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.TARGET_FILE_SIZE_BYTES, "10",
+            BinPackRewriteFilePlanner.MIN_FILE_SIZE_BYTES, "5",
+            BinPackRewriteFilePlanner.MAX_FILE_SIZE_BYTES, "20");
+
+    BinPackRewriteFilePlanner sizeOnly = new BinPackRewriteFilePlanner(table);
+    sizeOnly.init(sizeOptions);
+    assertThat(plannedLocations(sizeOnly.plan())).containsExactly(FILE_6.location());
+
+    BinPackRewriteFilePlanner included = new BinPackRewriteFilePlanner(table);
+    included.init(
+        ImmutableMap.<String, String>builder()
+            .putAll(sizeOptions)
+            .put(RewriteDataFiles.INCLUDE_FILES, FILE_1.location() + "," + FILE_2.location())
+            .buildOrThrow());
+    assertThat(plannedLocations(included.plan()))
+        .containsExactlyInAnyOrder(FILE_1.location(), FILE_2.location());
+  }
+
+  @Test
+  void testIncludeFilesSingleSmallFileGroupIsNotRewritten() {
+    // include-files only replaces the per-file selection; group filters still apply, so a lone
+    // small file in a partition is not rewritten (same behavior as the 1.10 based fork)
+    addFiles();
+    BinPackRewriteFilePlanner planner = new BinPackRewriteFilePlanner(table);
+    planner.init(
+        ImmutableMap.of(
+            BinPackRewriteFilePlanner.MIN_INPUT_FILES,
+            "1",
+            RewriteDataFiles.INCLUDE_FILES,
+            FILE_1.location()));
+
+    assertThat(plannedLocations(planner.plan())).isEmpty();
+  }
+
+  private static List<String> plannedLocations(
+      FileRewritePlan<FileGroupInfo, FileScanTask, DataFile, RewriteFileGroup> plan) {
+    return Lists.newArrayList(plan.groups().iterator()).stream()
+        .flatMap(group -> group.fileScanTasks().stream())
+        .map(task -> task.file().location())
+        .collect(Collectors.toList());
   }
 
   private void addFiles() {
