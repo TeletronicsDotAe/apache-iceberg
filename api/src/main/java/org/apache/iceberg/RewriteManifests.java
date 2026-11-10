@@ -86,4 +86,15 @@ public interface RewriteManifests extends SnapshotUpdate<RewriteManifests> {
    * @return this for method chaining
    */
   RewriteManifests addManifest(ManifestFile manifest);
+
+  /**
+   * Runs the RewriteManifests without validating that the file counts are the same before and
+   * after. This allows for removing missing manifest files from the table, or adding manifests with
+   * additional files.
+   *
+   * <p><b>Use with Caution!!!</b>
+   *
+   * @return this for method chaining
+   */
+  RewriteManifests withoutValidation();
 }

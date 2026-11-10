@@ -996,6 +996,37 @@ public class TestRewriteManifests extends TestBase {
   }
 
   @TestTemplate
+  public void testDeleteManifestWithoutValidation() {
+    table.newFastAppend().appendFile(FILE_A).commit();
+    table.newFastAppend().appendFile(FILE_B).commit();
+
+    List<ManifestFile> manifests = table.currentSnapshot().allManifests(table.io());
+    assertThat(manifests).hasSize(2);
+    ManifestFile manifestWithFileA =
+        manifests.stream()
+            .filter(manifest -> manifest.snapshotId() != table.currentSnapshot().snapshotId())
+            .findFirst()
+            .orElseThrow();
+
+    // dropping a manifest without re-adding its files is rejected by default
+    assertThatThrownBy(() -> table.rewriteManifests().deleteManifest(manifestWithFileA).commit())
+        .isInstanceOf(ValidationException.class)
+        .hasMessageStartingWith(
+            "Replaced and created manifests must have the same number of active files");
+
+    table.rewriteManifests().deleteManifest(manifestWithFileA).withoutValidation().commit();
+
+    List<ManifestFile> remaining = table.currentSnapshot().allManifests(table.io());
+    assertThat(remaining).hasSize(1).doesNotContain(manifestWithFileA);
+    assertThat(table.currentSnapshot().operation()).isEqualTo(DataOperations.REPLACE);
+    validateManifestEntries(
+        remaining.get(0),
+        ids(remaining.get(0).snapshotId()),
+        files(FILE_B),
+        statuses(ManifestEntry.Status.ADDED));
+  }
+
+  @TestTemplate
   public void testManifestReplacementFailure() throws IOException {
     assertThat(table.currentSnapshot()).isNull();
 
